@@ -89,7 +89,7 @@ Options:
   --unique                 Generate unique cache per user (based on User-Agent or cookies). (default: false)
   --cache-timeout <time>   Duration to keep cached responses before expiration (e.g., 10s, 5m, 1h). (default: none)
   --cache-folder <string>  Directory to cache proxy server in. (default: "./cache")
-  --clear-cache			   Clear the cache of proxy server and exit.
+  --clear-cache            Clear the cache of proxy server and exit.
   -h, --help               Show this help message.`)
 }
 
