@@ -1,7 +1,8 @@
 ## 🔄 Caching Proxy
 
 A fully functional and self-contained caching proxy, ready to use with minimal setup.
-Download the pre-built executable for your architecture or build it yourself using a Docker container.
+
+[Download](https://github.com/ig-rudenko/caching-proxy/releases) the pre-built executable for your architecture or build it yourself using a Docker container.
 
 A solution for [Roadmap.sh - Caching Proxy](https://roadmap.sh/projects/caching-server).
 
