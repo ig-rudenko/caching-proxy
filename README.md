@@ -23,13 +23,13 @@ A solution for [Roadmap.sh - Caching Proxy](https://roadmap.sh/projects/caching-
 For example, to run the proxy on port 3000 and forward requests to https://github.com/, use the following command:
 
 ```shell
-caching-proxy --port 3000 --origin https://github.com/
+caching-proxy --port 3000 --origin "https://github.com/"
 ```
 
 To create a unique cache for each user and automatically clear it after 5 minutes, use the command:
 
 ```shell
-caching-proxy --port 3000 --origin https://github.com/ --unique --cache-timeout 5m
+caching-proxy --port 3000 --origin "https://github.com/" --unique --cache-timeout 5m
 ```
 
 
