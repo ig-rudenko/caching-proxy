@@ -7,22 +7,25 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Cache struct {
+	timeout    time.Duration
 	folderPath string
 }
 
-func New(folderPath string) *Cache {
-	c := &Cache{folderPath}
+func New(timeout time.Duration, folderPath string) *Cache {
+	c := &Cache{timeout, folderPath}
 	c.createCacheDir()
 	return c
 }
 
 func (c *Cache) Has(key string) bool {
-	log.Printf("CACHE HAS %s\n", key)
+	c.deleteCacheByExpiration(key)
 	filePath := c.getFilePath(key)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return false
@@ -76,7 +79,8 @@ func (c *Cache) GetHeaders(key string) (*http.Header, bool) {
 }
 
 func (c *Cache) Get(key string) ([]byte, bool) {
-	log.Printf("CACHE GET %s\n", key)
+	c.deleteCacheByExpiration(key)
+
 	// Проверяем, существует ли файл
 	filePath := c.getFilePath(key)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -113,7 +117,6 @@ func (c *Cache) SetHeaders(key string, headers *http.Header) error {
 
 func (c *Cache) Set(key string, value []byte) error {
 	filePath := c.getFilePath(key)
-	log.Printf("CACHE SET %s\n", key)
 
 	// Создаем файл с правами на запись (rw-r--r--)
 	file, err := os.Create(filePath)
@@ -132,6 +135,81 @@ func (c *Cache) Set(key string, value []byte) error {
 	}
 
 	return nil
+}
+
+// RunCleanUp запускает функцию в горутине для периодической очистки
+func (c *Cache) RunCleanUp() {
+	go c.cleanUpOldFiles()
+}
+
+// CleanUpOldFiles проверяет файлы в директории и удаляет те, которые старше таймаута
+func (c *Cache) cleanUpOldFiles() {
+	if c.timeout <= 0 {
+		return
+	}
+
+	for {
+		// Проходим по всем файлам в директории
+		err := filepath.Walk(c.folderPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// Проверяем, что это файл (а не папка)
+			if !info.IsDir() {
+				// Если файл был изменён больше, чем на timeout назад, удаляем его
+				if time.Since(info.ModTime()) > c.timeout {
+					log.Printf("Removing old file: %s\n", path)
+					if err := os.Remove(path); err != nil {
+						log.Printf("Error removing file: %s\n", err)
+					}
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			log.Printf("Error walking through directory: %s\n", err)
+		}
+
+		// Ждем перед следующим запуском
+		time.Sleep(c.timeout)
+	}
+}
+
+func (c *Cache) deleteCacheByExpiration(key string) {
+	if c.timeout <= 0 {
+		return
+	}
+
+	for _, cacheKey := range []string{key, key + "-status", key + "-headers"} {
+		filePath := c.getFilePath(cacheKey)
+		stats, err := os.Stat(filePath)
+		if err != nil {
+			return
+		}
+
+		if time.Since(stats.ModTime()) > c.timeout {
+			_ = os.Remove(filePath)
+		}
+	}
+}
+
+func (c *Cache) ClearAll() {
+	// Получаем список всех файлов и директорий в папке
+	files, err := os.ReadDir(c.folderPath)
+	if err != nil {
+		log.Fatalf("failed to read directory: %w", err)
+	}
+
+	// Проходим по каждому элементу и удаляем его
+	for _, file := range files {
+		filePath := filepath.Join(c.folderPath, file.Name())
+		err := os.RemoveAll(filePath) // Удаляем файл или директорию рекурсивно
+		if err != nil {
+			log.Printf("failed to remove %s: %s", filePath, err)
+		}
+	}
 }
 
 func (c *Cache) getFilePath(key string) string {

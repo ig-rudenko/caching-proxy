@@ -23,12 +23,17 @@ type Cache interface {
 }
 
 type Proxy struct {
-	cache  Cache
-	origin *url.URL
+	cache        Cache
+	origin       *url.URL
+	uniqueByUser bool
 }
 
 func New(cache Cache, origin *url.URL) *Proxy {
-	return &Proxy{cache, origin}
+	return &Proxy{cache, origin, false}
+}
+
+func (p *Proxy) SetUniqueByUser(is bool) {
+	p.uniqueByUser = is
 }
 
 func (p *Proxy) Start(host string, port int) {
@@ -48,29 +53,54 @@ func (p *Proxy) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestURL := r.URL.String()
-	cacheKey := getMD5Hash(requestURL)
-
-	isCached := p.cache.Has(cacheKey)
+	cacheKey := p.getRequestCacheKey(r)
+	isCached := p.hasRequestInCache(cacheKey)
 
 	var headerXCacheValue string
 
 	if !isCached {
 		headerXCacheValue = "MISS"
-		log.Printf("Cache miss for %s\n", cacheKey)
-		w.Header().Set("x-cache", headerXCacheValue)
+		w.Header().Set("X-Cache", headerXCacheValue)
 		p.proxyRequest(w, r, true, cacheKey)
 
 	} else {
 		headerXCacheValue = "HIT"
-		w.Header().Set("x-cache", headerXCacheValue)
+		w.Header().Set("X-Cache", headerXCacheValue)
 		p.responseFromCache(w, cacheKey)
 	}
-	log.Printf("Cache %s for URL: %s", headerXCacheValue, requestURL)
+
+	log.Printf("Cache %s for URL: %s", headerXCacheValue, r.URL.String())
 }
 
-func (p *Proxy) hasRequest(urlHash string) bool {
-	return p.cache.Has(urlHash) && p.cache.Has(urlHash+"-status") && p.cache.Has(urlHash+"-headers")
+func (p *Proxy) getRequestCacheKey(r *http.Request) string {
+	// Собираем ключ из URL, метода, заголовков (например, User-Agent и Cookie)
+	var keyParts []string
+
+	// Добавляем URL
+	keyParts = append(keyParts, r.URL.String())
+
+	if p.uniqueByUser {
+		// Добавляем User-Agent
+		userAgent := r.Header.Get("User-Agent")
+		if userAgent != "" {
+			keyParts = append(keyParts, userAgent)
+		}
+
+		// Добавляем куки
+		if cookies := r.Header.Get("Cookie"); cookies != "" {
+			keyParts = append(keyParts, cookies)
+		}
+	}
+
+	// Собираем все части ключа в одну строку
+	rawKey := strings.Join(keyParts, "|")
+
+	hash := md5.Sum([]byte(rawKey))
+	return hex.EncodeToString(hash[:])
+}
+
+func (p *Proxy) hasRequestInCache(key string) bool {
+	return p.cache.Has(key) && p.cache.Has(key+"-status") && p.cache.Has(key+"-headers")
 }
 
 func (p *Proxy) responseFromCache(w http.ResponseWriter, cacheKey string) {
@@ -92,7 +122,7 @@ func (p *Proxy) responseFromCache(w http.ResponseWriter, cacheKey string) {
 }
 
 func (p *Proxy) proxyRequest(w http.ResponseWriter, r *http.Request, caching bool, cacheKey string) {
-	resp, err := p.getRequestDataFromOrigin(r)
+	resp, err := p.getResponseFromOrigin(r)
 	if err != nil {
 		http.Error(w, "Failed to fetch data from origin", http.StatusInternalServerError)
 		return
@@ -126,12 +156,7 @@ func (p *Proxy) proxyRequest(w http.ResponseWriter, r *http.Request, caching boo
 }
 
 // getRequestDataFromOrigin отправляет запрос к оригинальному серверу и возвращает тело ответа
-func (p *Proxy) getRequestDataFromOrigin(r *http.Request) (*http.Response, error) {
-
-	//newUrl, _ := url.Parse(r.URL.String())
-	//newUrl.Scheme = p.origin.Scheme
-	//newUrl.Host = p.origin.Host
-
+func (p *Proxy) getResponseFromOrigin(r *http.Request) (*http.Response, error) {
 	newURL := *p.origin
 	newURL.Path = r.URL.Path
 	newURL.RawQuery = r.URL.RawQuery
@@ -158,9 +183,4 @@ func isNotSafeMethod(method string) bool {
 	method = strings.ToUpper(method)
 	safeMethods := []string{http.MethodGet, http.MethodHead, http.MethodOptions}
 	return !slices.Contains(safeMethods, method)
-}
-
-func getMD5Hash(text string) string {
-	hash := md5.Sum([]byte(text))
-	return hex.EncodeToString(hash[:])
 }
