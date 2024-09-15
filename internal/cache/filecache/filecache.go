@@ -14,16 +14,18 @@ import (
 )
 
 type Cache struct {
-	timeout    time.Duration
-	folderPath string
+	timeout    time.Duration // Duration before cache entries expire
+	folderPath string        // Directory where cache files are stored
 }
 
+// New creates a new Cache instance with the specified timeout and folder path
 func New(timeout time.Duration, folderPath string) *Cache {
 	c := &Cache{timeout, folderPath}
 	c.createCacheDir()
 	return c
 }
 
+// Has checks if a cache entry exists for the given key
 func (c *Cache) Has(key string) bool {
 	c.deleteCacheByExpiration(key)
 	filePath := c.getFilePath(key)
@@ -33,13 +35,14 @@ func (c *Cache) Has(key string) bool {
 	return true
 }
 
+// GetInt retrieves an integer value from the cache for the given key
 func (c *Cache) GetInt(key string) (int, bool) {
 	data, ok := c.Get(key)
 	if !ok {
 		return 0, false
 	}
 
-	// Преобразуем []byte в строку, а затем в число
+	// Convert []byte to string and then to an integer
 	intValue, err := strconv.Atoi(string(data))
 	if err != nil {
 		return 0, false
@@ -48,6 +51,7 @@ func (c *Cache) GetInt(key string) (int, bool) {
 	return intValue, true
 }
 
+// GetHeaders retrieves HTTP headers from the cache for the given key
 func (c *Cache) GetHeaders(key string) (*http.Header, bool) {
 	data, ok := c.Get(key)
 	if !ok {
@@ -60,9 +64,9 @@ func (c *Cache) GetHeaders(key string) (*http.Header, bool) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
-			continue // Пропускаем пустые строки
+			continue // Skip empty lines
 		}
-		// Разделяем строку на имя и значение заголовка
+		// Split the line into header name and value
 		parts := strings.SplitN(line, ": ", 2)
 		if len(parts) != 2 {
 			return nil, false
@@ -78,35 +82,38 @@ func (c *Cache) GetHeaders(key string) (*http.Header, bool) {
 	return &headers, true
 }
 
+// Get retrieves raw data from the cache for the given key
 func (c *Cache) Get(key string) ([]byte, bool) {
 	c.deleteCacheByExpiration(key)
 
-	// Проверяем, существует ли файл
+	// Check if the file exists
 	filePath := c.getFilePath(key)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		// Если файл не существует, возвращаем пустой []byte и статус false
+		// If the file does not exist, return empty []byte and false
 		return []byte{}, false
 	}
 
-	// Читаем содержимое файла
+	// Read the file content
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		// Если при чтении произошла ошибка, возвращаем пустой []byte и статус false
+		// If there is an error reading the file, return empty []byte and false
 		return []byte{}, false
 	}
 
-	// Возвращаем содержимое файла и статус true
+	// Return file content and true
 	return data, true
 }
 
+// SetInt stores an integer value in the cache with the given key
 func (c *Cache) SetInt(key string, value int) error {
 	return c.Set(key, []byte(strconv.Itoa(value)))
 }
 
+// SetHeaders stores HTTP headers in the cache with the given key
 func (c *Cache) SetHeaders(key string, headers *http.Header) error {
 	var buf bytes.Buffer
 
-	// Проходим по всем заголовкам и добавляем их в буфер
+	// Iterate over all headers and add them to the buffer
 	for name, values := range *headers {
 		for _, value := range values {
 			buf.WriteString(fmt.Sprintf("%s: %s\n", name, value))
@@ -115,20 +122,21 @@ func (c *Cache) SetHeaders(key string, headers *http.Header) error {
 	return c.Set(key, buf.Bytes())
 }
 
+// Set stores raw data in the cache with the given key
 func (c *Cache) Set(key string, value []byte) error {
 	filePath := c.getFilePath(key)
 
-	// Создаем файл с правами на запись (rw-r--r--)
+	// Create a file with read and write permissions (rw-r--r--)
 	file, err := os.Create(filePath)
 	if err != nil {
-		return fmt.Errorf("error add to cache")
+		return fmt.Errorf("error adding to cache")
 	}
 
 	defer func(file *os.File) {
 		_ = file.Close()
 	}(file)
 
-	// Записываем данные в файл
+	// Write data to the file
 	_, err = file.Write(value)
 	if err != nil {
 		return err
@@ -137,27 +145,27 @@ func (c *Cache) Set(key string, value []byte) error {
 	return nil
 }
 
-// RunCleanUp запускает функцию в горутине для периодической очистки
+// RunCleanUp starts a goroutine for periodic cleanup of old cache files
 func (c *Cache) RunCleanUp() {
 	go c.cleanUpOldFiles()
 }
 
-// CleanUpOldFiles проверяет файлы в директории и удаляет те, которые старше таймаута
+// cleanUpOldFiles checks files in the directory and removes those older than the timeout
 func (c *Cache) cleanUpOldFiles() {
 	if c.timeout <= 0 {
 		return
 	}
 
 	for {
-		// Проходим по всем файлам в директории
+		// Iterate over all files in the directory
 		err := filepath.Walk(c.folderPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 
-			// Проверяем, что это файл (а не папка)
+			// Check if it is a file (not a directory)
 			if !info.IsDir() {
-				// Если файл был изменён больше, чем на timeout назад, удаляем его
+				// If the file was modified longer than timeout ago, remove it
 				if time.Since(info.ModTime()) > c.timeout {
 					log.Printf("Removing old file: %s\n", path)
 					if err := os.Remove(path); err != nil {
@@ -172,11 +180,12 @@ func (c *Cache) cleanUpOldFiles() {
 			log.Printf("Error walking through directory: %s\n", err)
 		}
 
-		// Ждем перед следующим запуском
+		// Wait before the next cleanup run
 		time.Sleep(c.timeout)
 	}
 }
 
+// deleteCacheByExpiration removes cache entries that are older than the timeout
 func (c *Cache) deleteCacheByExpiration(key string) {
 	if c.timeout <= 0 {
 		return
@@ -195,29 +204,31 @@ func (c *Cache) deleteCacheByExpiration(key string) {
 	}
 }
 
+// ClearAll removes all files and directories in the cache folder
 func (c *Cache) ClearAll() {
-	// Получаем список всех файлов и директорий в папке
+	// Get a list of all files and directories in the folder
 	files, err := os.ReadDir(c.folderPath)
 	if err != nil {
 		log.Fatalf("failed to read directory: %w", err)
 	}
 
-	// Проходим по каждому элементу и удаляем его
+	// Iterate over each item and remove it
 	for _, file := range files {
 		filePath := filepath.Join(c.folderPath, file.Name())
-		err := os.RemoveAll(filePath) // Удаляем файл или директорию рекурсивно
+		err := os.RemoveAll(filePath) // Remove file or directory recursively
 		if err != nil {
 			log.Printf("failed to remove %s: %s", filePath, err)
 		}
 	}
 }
 
+// getFilePath generates the file path for the given cache key
 func (c *Cache) getFilePath(key string) string {
 	return c.folderPath + "/" + key
 }
 
+// createCacheDir creates the cache directory with permissions 0755 (read/write for owner, read for group and others)
 func (c *Cache) createCacheDir() {
-	// Создаем папку с правами 0755 (чтение/запись для владельца и чтение для группы и других пользователей)
 	err := os.MkdirAll(c.folderPath, 0755)
 	if err != nil {
 		log.Fatalf("failed to create cache directory: %s\n", err)

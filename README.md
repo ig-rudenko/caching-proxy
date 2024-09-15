@@ -44,13 +44,13 @@ Detailed usage instructions:
 
 ## 🏗 Build
 
-🐳 Docker image:
+🐳 Docker image (16.09 MB):
 
 ```shell
 docker build -t caching-proxy:0.1 .
 ```
 
-✍ From Source:
+✍ From Source (8MB):
 
 ```shell
 CGO_ENABLED=0 go build -o caching-proxy ./cmd/main.go
